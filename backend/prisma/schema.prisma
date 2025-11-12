@@ -1,0 +1,348 @@
+// TM LIMITED - Database Schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USER & AUTH
+// ============================================
+
+enum UserRole {
+  ADMIN           // Полный доступ
+  MANAGER         // Управление заказами
+  CONTENT_MANAGER // Управление контентом и товарами
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  firstName String   @map("first_name")
+  lastName  String   @map("last_name")
+  role      UserRole @default(MANAGER)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+// ============================================
+// CATEGORIES
+// ============================================
+
+model Category {
+  id          String    @id @default(uuid())
+  name        String
+  slug        String    @unique
+  description String?
+  image       String?
+  parentId    String?   @map("parent_id")
+  parent      Category? @relation("CategoryToCategory", fields: [parentId], references: [id], onDelete: SetNull)
+  children    Category[] @relation("CategoryToCategory")
+
+  // SEO
+  metaTitle       String? @map("meta_title")
+  metaDescription String? @map("meta_description")
+
+  isActive  Boolean @default(true) @map("is_active")
+  sortOrder Int     @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  products Product[]
+
+  @@index([slug])
+  @@index([parentId])
+  @@map("categories")
+}
+
+// ============================================
+// PRODUCTS
+// ============================================
+
+model Product {
+  id          String  @id @default(uuid())
+  name        String
+  slug        String  @unique
+  sku         String  @unique
+  description String  @db.Text
+  price       Decimal @db.Decimal(10, 2)
+  oldPrice    Decimal? @map("old_price") @db.Decimal(10, 2)
+
+  // Content
+  composition String? @db.Text // Состав
+  care        String? @db.Text // Уход
+
+  // Images
+  images      String[] // Array of image URLs
+
+  // Category
+  categoryId  String   @map("category_id")
+  category    Category @relation(fields: [categoryId], references: [id])
+
+  // Stock
+  inStock     Boolean @default(true) @map("in_stock")
+
+  // Flags
+  isNew       Boolean @default(false) @map("is_new")
+  isFeatured  Boolean @default(false) @map("is_featured")
+  isActive    Boolean @default(true) @map("is_active")
+
+  // SEO
+  metaTitle       String? @map("meta_title")
+  metaDescription String? @map("meta_description")
+
+  // Stats
+  viewsCount  Int @default(0) @map("views_count")
+  salesCount  Int @default(0) @map("sales_count")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  variants    ProductVariant[]
+  orderItems  OrderItem[]
+
+  @@index([slug])
+  @@index([sku])
+  @@index([categoryId])
+  @@map("products")
+}
+
+// ============================================
+// PRODUCT VARIANTS (Size, Color, etc.)
+// ============================================
+
+model ProductVariant {
+  id        String  @id @default(uuid())
+  productId String  @map("product_id")
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  // Attributes
+  size      String?
+  color     String?
+  colorHex  String? @map("color_hex") // Hex color code
+  material  String?
+
+  // Stock
+  quantity  Int     @default(0)
+  sku       String  @unique
+
+  // Price override (optional)
+  price     Decimal? @db.Decimal(10, 2)
+
+  isActive  Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  orderItems OrderItem[]
+
+  @@index([productId])
+  @@index([sku])
+  @@map("product_variants")
+}
+
+// ============================================
+// ORDERS
+// ============================================
+
+enum OrderStatus {
+  PENDING     // Создан, ожидает оплаты
+  PAID        // Оплачен
+  PROCESSING  // Собирается
+  SHIPPED     // Отправлен
+  DELIVERED   // Доставлен
+  CANCELLED   // Отменен
+  REFUNDED    // Возвращен
+}
+
+enum PaymentStatus {
+  PENDING   // Ожидает оплаты
+  PAID      // Оплачен
+  FAILED    // Ошибка оплаты
+  REFUNDED  // Возврат средств
+}
+
+enum DeliveryMethod {
+  CDEK_PICKUP  // СДЭК - ПВЗ
+  CDEK_COURIER // СДЭК - Курьер
+  RUSSIAN_POST // Почта РФ
+}
+
+model Order {
+  id         String    @id @default(uuid())
+  orderNumber String   @unique @map("order_number") // Публичный номер заказа
+
+  // Customer info (no registration required)
+  customerEmail     String  @map("customer_email")
+  customerPhone     String  @map("customer_phone")
+  customerFirstName String  @map("customer_first_name")
+  customerLastName  String  @map("customer_last_name")
+
+  // Delivery
+  deliveryMethod  DeliveryMethod @map("delivery_method")
+  deliveryAddress String         @map("delivery_address") @db.Text
+  deliveryCity    String         @map("delivery_city")
+  deliveryZipCode String?        @map("delivery_zip_code")
+  deliveryPrice   Decimal        @map("delivery_price") @db.Decimal(10, 2)
+  trackingNumber  String?        @map("tracking_number") // Трек-номер
+
+  // Payment
+  subtotal      Decimal       @db.Decimal(10, 2)
+  total         Decimal       @db.Decimal(10, 2)
+  paymentStatus PaymentStatus @default(PENDING) @map("payment_status")
+  paymentId     String?       @map("payment_id") // YooKassa payment ID
+
+  // Status
+  status    OrderStatus @default(PENDING)
+
+  // Notes
+  customerNote String? @map("customer_note") @db.Text
+  adminNote    String? @map("admin_note") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  paidAt    DateTime? @map("paid_at")
+  shippedAt DateTime? @map("shipped_at")
+
+  items     OrderItem[]
+  payments  Payment[]
+
+  @@index([orderNumber])
+  @@index([customerEmail])
+  @@index([status])
+  @@map("orders")
+}
+
+// ============================================
+// ORDER ITEMS
+// ============================================
+
+model OrderItem {
+  id        String @id @default(uuid())
+  orderId   String @map("order_id")
+  order     Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  productId String  @map("product_id")
+  product   Product @relation(fields: [productId], references: [id])
+
+  variantId String?         @map("variant_id")
+  variant   ProductVariant? @relation(fields: [variantId], references: [id])
+
+  // Snapshot data (in case product is deleted/updated)
+  productName String  @map("product_name")
+  productSku  String  @map("product_sku")
+  variantSize String? @map("variant_size")
+  variantColor String? @map("variant_color")
+
+  price    Decimal @db.Decimal(10, 2)
+  quantity Int
+  subtotal Decimal @db.Decimal(10, 2)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+// ============================================
+// PAYMENTS (YooKassa)
+// ============================================
+
+model Payment {
+  id              String   @id @default(uuid())
+  orderId         String   @map("order_id")
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  // YooKassa data
+  yookassaId      String   @unique @map("yookassa_id")
+  status          String   // pending, succeeded, canceled
+  amount          Decimal  @db.Decimal(10, 2)
+  currency        String   @default("RUB")
+  paymentMethod   String?  @map("payment_method") // bank_card, sbp, sberbank, etc.
+
+  // Additional data
+  metadata        Json?
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  paidAt          DateTime? @map("paid_at")
+
+  @@index([orderId])
+  @@index([yookassaId])
+  @@map("payments")
+}
+
+// ============================================
+// STATIC PAGES (About, Contacts, etc.)
+// ============================================
+
+model Page {
+  id      String  @id @default(uuid())
+  title   String
+  slug    String  @unique
+  content String  @db.Text
+
+  // SEO
+  metaTitle       String? @map("meta_title")
+  metaDescription String? @map("meta_description")
+
+  isActive  Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([slug])
+  @@map("pages")
+}
+
+// ============================================
+// BANNERS (Homepage)
+// ============================================
+
+model Banner {
+  id          String  @id @default(uuid())
+  title       String
+  subtitle    String?
+  image       String
+  link        String?
+  buttonText  String? @map("button_text")
+
+  isActive    Boolean @default(true) @map("is_active")
+  sortOrder   Int     @default(0) @map("sort_order")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("banners")
+}
+
+// ============================================
+// ANALYTICS & STATS
+// ============================================
+
+model Analytics {
+  id        String   @id @default(uuid())
+  date      DateTime @db.Date
+
+  // Metrics
+  views         Int @default(0)
+  uniqueVisitors Int @default(0) @map("unique_visitors")
+  orders        Int @default(0)
+  revenue       Decimal @default(0) @db.Decimal(10, 2)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([date])
+  @@index([date])
+  @@map("analytics")
+}
