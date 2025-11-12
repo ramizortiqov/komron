@@ -5,6 +5,9 @@ FROM node:18-alpine AS development
 
 WORKDIR /app
 
+# Install system dependencies for Prisma
+RUN apk add --no-cache openssl libc6-compat
+
 # Install dependencies
 COPY package*.json ./
 RUN npm install
@@ -24,6 +27,9 @@ FROM node:18-alpine AS build
 
 WORKDIR /app
 
+# Install system dependencies for Prisma
+RUN apk add --no-cache openssl libc6-compat
+
 # Install dependencies
 COPY package*.json ./
 RUN npm ci
@@ -41,6 +47,9 @@ RUN npm run build
 FROM node:18-alpine AS production
 
 WORKDIR /app
+
+# Install system dependencies for Prisma
+RUN apk add --no-cache openssl libc6-compat
 
 # Install only production dependencies
 COPY package*.json ./
